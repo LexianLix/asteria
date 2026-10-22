@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "asteria-reader"
+dynamic = ["version"]
+description = "Asteria: a local-first AI workspace for discovering and reading research papers"
+readme = "README.md"
+license = {file = "LICENSE"}
+authors = [{name = "LexianLix"}]
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi>=0.115",
+  "uvicorn>=0.30",
+  "pdfplumber>=0.11",
+  "python-multipart>=0.0.20",
+  "psutil>=5.9",
+  "PyJWT[crypto]>=2.10,<3",
+]
+
+[project.optional-dependencies]
+desktop = ["pywebview>=6.0,<7", "pystray>=0.19.5,<0.20", "Pillow>=10"]
+build = ["pyinstaller>=6.19,<7"]
+test = ["httpx>=0.28", "playwright>=1.50", "reportlab>=4", "psutil>=5.9"]
+
+[project.urls]
+Homepage = "https://github.com/LexianLix/asteria"
+Repository = "https://github.com/LexianLix/asteria"
+Issues = "https://github.com/LexianLix/asteria/issues"
+
+[project.scripts]
+asteria = "paper_reader.cli:main"
+paper-reader = "paper_reader.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["paper_reader*"]
+
+[tool.setuptools.dynamic]
+version = {attr = "paper_reader.__version__"}
+
+[tool.setuptools.package-data]
+paper_reader = ["web/**/*", "web/*"]

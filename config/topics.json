@@ -1,0 +1,32 @@
+{
+  "sources": {
+    "arxiv": {
+      "categories": ["cs.AI", "cs.CL", "cs.CV", "cs.LG"],
+      "keywords": [
+        "large language model",
+        "retrieval augmented generation",
+        "reasoning",
+        "computer vision"
+      ],
+      "max_results": 30
+    },
+    "openalex": {
+      "enabled": false,
+      "keywords": [
+        "large language model",
+        "retrieval augmented generation",
+        "computer vision"
+      ],
+      "days_back": 2,
+      "max_results": 30
+    }
+  },
+  "tags": {
+    "大语言模型": ["large language model", "llm", "language model"],
+    "检索增强": ["retrieval augmented generation", "rag", "retrieval-augmented"],
+    "推理": ["reasoning", "chain of thought", "test-time compute"],
+    "智能体": ["agent", "tool use", "planning"],
+    "计算机视觉": ["computer vision", "image", "object detection", "segmentation", "vision transformer"],
+    "机器学习": ["machine learning", "deep learning", "neural network", "transformer"]
+  }
+}

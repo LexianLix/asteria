@@ -1,0 +1,38 @@
+# Environments and caches
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+.coverage
+htmlcov/
+
+# Private libraries, credentials and local settings
+data/
+.paper-reader-private/
+.env
+.env.*
+!.env.example
+*.sqlite
+*.sqlite-*
+*.db
+*.db-*
+*.pdf
+desktop-settings.json
+desktop-ready.json
+chatgpt-auth.json
+chatgpt-host.json
+*.pem
+*.key
+*.pfx
+*.log
+
+# Build outputs and local tools
+build/
+dist/
+tmp/
+.idea/
+.vscode/
+Thumbs.db
+.DS_Store
