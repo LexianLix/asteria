@@ -25,6 +25,7 @@ def main():
     args.add_argument('--classification-mock', action='store_true')
     args.add_argument('--source-rate-mock', action='store_true')
     args.add_argument('--reader-cache', type=Path)
+    args.add_argument('--translation-gaps', action='store_true')
     options = args.parse_args()
     port = options.port
     with tempfile.TemporaryDirectory(prefix="paper-reader-ui-") as folder:
@@ -220,6 +221,17 @@ def main():
             return {'count': MockModel.requests, 'last_prompt': MockModel.last_prompt}
         threading.Thread(target=model.serve_forever, daemon=True).start()
         app.state.reader_service.save_config({"provider": "ollama", "base_url": f"http://127.0.0.1:{model.server_port}", "model": "isolated-mock-model"})
+        if options.translation_gaps:
+            document = app.state.reader_service.document(1)
+            for page in document['pages']:
+                page['translated'] = {block['id']: '模拟缓存，仅供界面测试：' + block['en'] for block in page['blocks']}
+            document['pages'][0]['translated'][document['pages'][0]['blocks'][1]['id']] = '   '
+            document['pages'][0]['scientific_regions'] = [{'id': 'qa-new-table', 'kind': 'table',
+                'rows': [['Accuracy', '62.1', '-']], 'cell_translation_allowed': True,
+                'box': [.1, .7, .9, .8], 'block_ids': []}]
+            database.reader_put(1, 'document', document)
+            database.job_put('translate:1', {'status': 'done', 'done': len(document['pages']),
+                'total': len(document['pages']), 'scope': 'all', 'error': None})
         if options.chatgpt_mock:
             import io
             import httpx
@@ -274,8 +286,13 @@ def main():
             @app.post('/desktop/qa/chatgpt/mode')
             def qa_chatgpt_mode(value: dict):
                 mode['value'] = value['mode']; return {'mode': mode['value']}
+        server = uvicorn.Server(uvicorn.Config(app, host='127.0.0.1', port=port, log_level='warning'))
+        @app.post('/desktop/qa/shutdown')
+        def stop_owned_fixture():
+            server.should_exit = True
+            return {'stopping': True}
         try:
-            uvicorn.run(app, host="127.0.0.1", port=port, log_level="warning")
+            server.run()
         finally:
             if source_server:
                 source_server.shutdown(); source_server.server_close()

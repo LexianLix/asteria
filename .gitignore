@@ -4,6 +4,7 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 .ruff_cache/
+.mypy_cache/
 *.egg-info/
 .coverage
 htmlcov/
@@ -36,3 +37,18 @@ tmp/
 .vscode/
 Thumbs.db
 .DS_Store
+
+# Local acceptance reports and release binaries belong outside Git history
+/reports/
+/artifacts/
+/qa-output/
+/local-tools/
+/.codex/
+*.exe
+*.msi
+*.zip
+*.7z
+*.dmg
+*.apk
+*.aab
+*.ipa

@@ -151,6 +151,44 @@ def add_outline(doc: dict, *, source_path: Path | None = None) -> None:
     doc['outline_version'] = OUTLINE_VERSION
 
 
+def translation_cache_status(document):
+    """Measure current extraction keys, not a historical job's completion count.
+
+    Counts describe cache coverage only, never semantic translation accuracy.
+    This is derived response metadata and must not be stored as source content.
+    """
+    pages = []
+    for page in document.get('pages', []):
+        item = {'page_number': page['number'], 'state': 'blocked', 'total': 0,
+                'cached': 0, 'missing_text': 0, 'missing_local': 0}
+        try:
+            source, _, local = translation_input(page)
+            cache = page.get('translated', {})
+            if not isinstance(cache, dict):
+                raise ValueError('译文缓存格式无效，请先核对正文')
+            text_keys = {block['id'] for block in source}
+            if len(text_keys) != len(source) or text_keys.intersection(local):
+                raise ValueError('正文标识重复，请先核对正文')
+            valid = lambda key: isinstance(cache.get(key), str) and bool(cache[key].strip())
+            missing_text = sum(not valid(key) for key in text_keys)
+            missing_local = sum(not valid(key) for key in local)
+            total = len(text_keys) + len(local)
+            cached = total - missing_text - missing_local
+            state = ('no_text' if not total else 'complete' if cached == total
+                     else 'partial' if cached else 'not_started')
+            item.update(state=state, total=total, cached=cached,
+                        missing_text=missing_text, missing_local=missing_local)
+        except (ValueError, KeyError, TypeError):
+            item['error'] = '正文保护信息或缓存无效，请先核对正文；未自动修复。'
+        pages.append(item)
+    return {'total_pages': len(pages),
+            'complete_pages': sum(page['state'] == 'complete' for page in pages),
+            'no_text_pages': sum(page['state'] == 'no_text' for page in pages),
+            'blocked_pages': sum(page['state'] == 'blocked' for page in pages),
+            'missing_text': sum(page['missing_text'] for page in pages),
+            'missing_local': sum(page['missing_local'] for page in pages), 'pages': pages}
+
+
 def page_complete(page):
     """A migrated partial cache must not skip newly adopted paragraphs."""
     expected = {b['id'] for b in page['blocks']}
@@ -551,6 +589,43 @@ class ReaderService:
                               if any(p.get('reading_source') for p in doc['pages']) else
                               '文字提取版：复杂表格、公式及分栏顺序请与原 PDF 核对；空白扫描页可使用增强解析与 OCR。')
             return doc
+
+    def repair_local_translation(self, paper_id: int, page_number: int | None = None) -> dict:
+        """Explicitly fill missing literal keys without AI, edits, or job changes."""
+        with self._lock, self._extract_lock:
+            if paper_id in self._active:
+                raise ReaderBusyError('本论文正在翻译，请暂停并等待当前页结束后再补齐本地项')
+            doc = self.document(paper_id)
+            pages = doc['pages']
+            if page_number is not None:
+                if not 0 <= page_number < len(pages):
+                    raise ValueError('页码超出论文范围')
+                pages = [pages[page_number]]
+            plans = []
+            # Validate every selected page before changing even the in-memory
+            # cache. A malformed later page cannot cause a partial repair.
+            for page in pages:
+                try:
+                    source, _, local = translation_input(page)
+                    text_keys = {block['id'] for block in source}
+                except (KeyError, TypeError):
+                    raise ValueError('正文保护信息无效，请先核对正文') from None
+                if len(text_keys) != len(source) or text_keys.intersection(local):
+                    raise ValueError('正文标识重复，请先核对正文')
+                cache = page.get('translated', {})
+                if not isinstance(cache, dict):
+                    raise ValueError('译文缓存格式无效，请先核对正文')
+                missing = {key: value for key, value in local.items()
+                           if not isinstance(cache.get(key), str) or not cache[key].strip()}
+                if missing:
+                    plans.append((page, missing))
+            for page, missing in plans:
+                page.setdefault('translated', {}).update(missing)
+            if plans:
+                self.db.reader_put(paper_id, 'document', doc)
+            return {'added_local': sum(len(missing) for _, missing in plans),
+                    'changed_pages': len(plans), 'model_requests': 0,
+                    'translation_status': translation_cache_status(doc)}
 
     @staticmethod
     def translate_page(page: dict[str, Any], cfg: dict[str, Any], *, model_client=None) -> dict[str, str]:

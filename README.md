@@ -4,6 +4,10 @@
 
 Asteria 是一款本地优先的 AI 文献阅读工作台，将论文发现、文献整理、中文阅读和批注笔记放在同一个桌面应用中。不需要注册 Asteria 账号，文献库和笔记保存在自己的电脑上。
 
+[下载桌面版](https://github.com/LexianLix/asteria/releases/latest) · [反馈问题](https://github.com/LexianLix/asteria/issues) · [MIT 许可证](LICENSE)
+
+目前提供 Windows x64 桌面版。普通 PDF 阅读、批注和文献整理不依赖 AI 服务。
+
 ## 功能
 
 ### 发现与整理
@@ -21,6 +25,7 @@ Asteria 是一款本地优先的 AI 文献阅读工作台，将论文发现、�
 - 文字阅读、中文阅读和原文对照，支持字号调整与专注阅读。
 - 选段、本页和全文翻译，支持暂停续跑、失败页重试与缺项补译。
 - 术语表、手动修订，以及数字、引用等差异提示。
+- 逐页检查当前译文缓存缺项，区分待翻译文字与可本地补齐的数字、保护原文；本地补齐不调用 AI。
 - 公式、图表和表格原页区域查看；可选本地增强解析与 OCR。
 
 ### 批注与知识整理
@@ -35,12 +40,20 @@ Asteria 是一款本地优先的 AI 文献阅读工作台，将论文发现、�
 
 从 [Releases](https://github.com/LexianLix/asteria/releases/latest) 下载 Windows x64 安装包或便携包。
 
-- 安装包：运行 `Asteria-0.1.0-Setup-x64.exe`。
-- 便携包：完整解压 `Asteria-0.1.0-windows-x64.zip`，运行 `Asteria/Asteria.exe`，不要单独移动 EXE。
+- 安装包：下载文件名包含 `Setup` 的安装程序并运行。
+- 便携包：完整解压 Windows x64 ZIP，运行 `Asteria/Asteria.exe`，不要单独移动 EXE。
 
 普通阅读不需要 Python。桌面窗口需要 Microsoft WebView2 Runtime。安装包目前未做代码签名，请核对下载来源和发布页提供的 SHA256，不要关闭系统安全防护。
 
 首次使用可直接导入 PDF，或在设置中配置研究方向并采集论文。每日采集需要开启相应设置并保持应用运行；退出后不会继续执行，也不会自动创建开机启动或系统计划任务。
+
+### 开始阅读
+
+1. 导入本地 PDF，或设置研究方向后点击“获取新论文”。
+2. 打开文献，在原文、文字和中文阅读模式间切换。
+3. 需要翻译或问答时，先配置模型服务，再确认要发送的内容。
+4. 使用“译文检查”查看缺项；数字与保护原文可在本地补齐，其他文字仍需翻译。
+5. 圈画、高亮并记录笔记，按需导出 Markdown 或创建文献库备份。
 
 ### AI 服务
 
@@ -53,10 +66,14 @@ Asteria 是一款本地优先的 AI 文献阅读工作台，将论文发现、�
 - Windows 独立版默认将文献库保存在 `%LOCALAPPDATA%\Asteria\data`，与程序安装目录分开；卸载不会主动删除该文献库。
 - 模型凭据不包含在文献备份中；ChatGPT 授权令牌使用当前 Windows 用户的 DPAPI 加密保存。
 - 翻译和 AI 解读仅作阅读辅助，专业术语、数字、公式、复杂表格请结合原文核对。
+- “缓存齐全”仅说明当前提取内容没有缺少缓存项，不代表译文准确或原文提取无遗漏。
 - 中文阅读采用结构化排版，不是保留原版式的中文版 PDF。扫描文档的增强解析与 OCR 需要另行准备本地解析环境和模型。
 - 论文来源与全文下载受原站点政策及论文许可约束；Asteria 不提供付费墙绕过功能。
 
 ## 从源码运行
+
+<details>
+<summary>安装与启动命令</summary>
 
 需要 Python 3.11 或更高版本。Windows 桌面模式需要 WebView2 Runtime。
 
@@ -71,9 +88,11 @@ python -m paper_reader desktop
 
 也可以运行 `python -m paper_reader desktop --browser` 使用本机浏览器界面。源码模式的数据默认保存在项目的 `data/` 下，与独立版文献库分开；如需迁移，请使用应用内备份与恢复。
 
+</details>
+
 ## 致谢
 
-- [EasyRead](https://github.com/Edwardxlai/easyread)：本项目的重要参考项目，为结构化中文阅读、原文对照、逐页翻译任务和本地批注保存的设计提供了启发。参考其设计思路，不将其作为本项目自研成果。
+- [EasyRead](https://github.com/Edwardxlai/easyread)：重要的设计与架构参考，为结构化中文阅读、原文对照、逐页翻译和本地批注保存提供了启发。感谢作者与贡献者的开源分享。
 - [Mozilla PDF.js](https://github.com/mozilla/pdf.js)：原文 PDF 渲染及相关本地资源。
 - [pdfplumber](https://github.com/jsvine/pdfplumber) 与 [pdfminer.six](https://github.com/pdfminer/pdfminer.six)：PDF 文字与版面提取。
 - [pywebview](https://github.com/r0x0r/pywebview) 与 [pystray](https://github.com/moses-palmer/pystray)：桌面窗口与系统托盘。

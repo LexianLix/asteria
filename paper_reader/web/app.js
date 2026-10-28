@@ -9,6 +9,7 @@ import { regionPlacement, entirelyScientific } from '/assets/scientific-flow.js'
 import { installChatGPT } from '/assets/chatgpt.js';
 import { sourceSyncControl } from '/assets/source-status.js';
 import { installClassification } from '/assets/classification.js';
+import { installTranslationStatus, translationJobState, translationPageMessage } from '/assets/translation-status.js';
 pdfjs.GlobalWorkerOptions.workerSrc = '/assets/vendor/pdfjs/pdf.worker.mjs';
 
 const $ = (id) => document.getElementById(id);
@@ -290,7 +291,7 @@ async function loadDocument() {
   setStatus('正在提取文字，首次打开可能需要一些时间…');
   const doc = await api(`/desktop/papers/${state.paper.id}/document`);
   if (version !== state.loadVersion) return null;
-  state.doc = doc; state.total = doc.pages.length; state.page = Math.min(state.page, state.total - 1); updateControls();
+  state.doc = doc; state.total = doc.pages.length; state.page = Math.min(state.page, state.total - 1); updateControls(); updateJob();
   return doc;
 }
 async function renderPage() {
@@ -381,10 +382,15 @@ function renderText() {
     const placement = regionPlacement(page);
     if (page.reading_source) flow.append(node('p', 'parse-warning', '本页采用人工核对正文 · 原文与位置仍需核对；可在增强解析中切换旧版本。'));
     if (!page.blocks.length) flow.append(node('p', 'page-empty', '这一页没有可提取文字。可查看原 PDF，或通过增强解析与 OCR 核对并采用正文。'));
-    if (isChinese() && !Object.keys(page.translated).length) flow.append(node('p', 'parse-warning', page.error || '本页尚未翻译。可使用“翻译本页”或“翻译全文”。'));
+    if (isChinese()) {
+      const status = state.doc.translation_status?.pages.find(item => item.page_number === page.number);
+      const message = translationPageMessage(status);
+      if (page.error || message) flow.append(node('p', 'parse-warning', [page.error, message].filter(Boolean).join(' · ')));
+    }
     for (const block of page.blocks) {
       scientific.appendRegions(flow, page, placement.before.get(block.id) || [], { inline: true });
-      const edit = state.editor.edits?.[block.id], translated = edit ? edit.zh : page.translated[block.id];
+      const edit = state.editor.edits?.[block.id], value = edit ? edit.zh : page.translated[block.id];
+      const translated = typeof value === 'string' && value.trim() ? value : undefined;
       const language = isChinese() && translated !== undefined ? 'zh' : 'en';
       const wrapper = node('section', 'text-block' + (isChinese() && translated === undefined ? ' untranslated' : '')); wrapper.dataset.blockId = block.id;
       wrapper.classList.toggle('heading-block', block.type === 'heading');
@@ -555,12 +561,12 @@ async function gotoPage(page) {
 function updateJob() {
   const job = state.job;
   const active = ['queued', 'running', 'cancelling'].includes(job.status);
-  $('translate-button').disabled = active; $('translate-button').textContent = active ? '正在翻译…' : ['partial', 'paused', 'failed'].includes(job.status) ? '继续翻译' : job.status === 'done' ? (job.scope === 'page' ? '本页译文已完成' : job.scope === 'failed' ? '失败页补译完成' : '译文已完成') : '翻译全文';
+  const presentation = translationJobState(job, state.doc?.translation_status);
+  $('translate-button').disabled = active; $('translate-button').textContent = presentation.button;
   $('job-banner').hidden = job.status === 'idle' || !job.status;
   $('job-banner').classList.toggle('error', !!job.error);
   $('cancel-translation').hidden = !active; $('cancel-translation').disabled = job.status === 'cancelling';
-  const label = { queued: '正在准备论文', running: '正在翻译', cancelling: '正在暂停，等待当前请求返回', paused: '翻译已暂停', done: '翻译完成', partial: '部分页面尚未完成', failed: '翻译失败' }[job.status] || '';
-  $('job-text').textContent = `${label}${job.scope === 'page' ? ' · 当前页' : job.scope === 'failed' ? ' · 失败页补译' : ''}${job.total ? ` · ${job.done || 0} / ${job.total} 页` : ''}${job.error ? ' · ' + job.error : ''}`;
+  $('job-text').textContent = `${presentation.label}${active && job.scope === 'page' ? ' · 当前页' : active && job.scope === 'failed' ? ' · 失败页补译' : ''}${presentation.progress ? ` · ${presentation.progress}` : ''}${job.error ? ' · ' + job.error : ''}`;
   if (job.error) $('job-text').title = job.error;
 }
 async function pollJob() {
@@ -1031,6 +1037,7 @@ const discovery = installDiscovery({ state, $, node, api, toast, selectPaper });
 const scientific = installScientific({ state, $, node, api, toast, loadDocument, locateBlock, renderPage, openTranslation });
 const complex = installComplex({ state, $, node, api, toast, locateBlock, renderPage, renderCrop: scientific.renderCrop, openZoom: scientific.openZoom });
 installReviewed({ state, $, node, api, toast, renderCrop: scientific.renderCrop, renderPage, renderNotes });
+installTranslationStatus({ state, $, node, api, toast, updateJob, gotoPage, refresh: renderPage });
 const trayLabel = node('label', 'check-label'), trayInput = node('input');
 trayInput.id = 'close-to-tray'; trayInput.type = 'checkbox';
 trayLabel.append(trayInput, document.createTextNode('关闭窗口时驻留托盘，继续后台任务'));

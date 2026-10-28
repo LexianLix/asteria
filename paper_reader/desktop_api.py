@@ -17,7 +17,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 
-from .reader import ReaderBusyError, ReaderService, PARSER_VERSION, SCIENTIFIC_VERSION, file_hash, pdf_path, quality_warnings
+from .reader import ReaderBusyError, ReaderService, PARSER_VERSION, SCIENTIFIC_VERSION, file_hash, pdf_path, quality_warnings, translation_cache_status
 from . import __version__
 from .complex_service import ComplexParserService
 from .reviewed_reading import ReviewedReadingService
@@ -143,6 +143,10 @@ class TranslationScope(BaseModel):
     chatgpt_account_id: str | None = Field(default=None, min_length=64, max_length=64)
     chatgpt_generation: int | None = Field(default=None, ge=0)
     chatgpt_model: str | None = Field(default=None, min_length=1, max_length=200)
+
+
+class LocalTranslationRepair(BaseModel):
+    page_number: int | None = Field(default=None, ge=0)
 
 
 class SnippetRequest(BaseModel):
@@ -607,9 +611,20 @@ def install_desktop(app: FastAPI, settings: Settings, db: Database) -> ReaderSer
     def document(paper_id: int):
         require_paper(paper_id)
         try:
-            return service.document(paper_id)
+            doc = service.document(paper_id)
+            return {**doc, 'translation_status': translation_cache_status(doc)}
         except Exception as exc:
             raise HTTPException(422, f"无法解析 PDF：{exc}") from exc
+
+    @app.post('/desktop/papers/{paper_id}/translation/local-repair')
+    def repair_local_translation(paper_id: int, request: LocalTranslationRepair | None = None):
+        require_paper(paper_id)
+        try:
+            return service.repair_local_translation(paper_id, (request or LocalTranslationRepair()).page_number)
+        except ReaderBusyError as exc:
+            raise HTTPException(409, str(exc)) from None
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from None
 
     @app.post("/desktop/papers/{paper_id}/translation", status_code=202)
     def start_translation(paper_id: int, request: TranslationScope | None = None):
