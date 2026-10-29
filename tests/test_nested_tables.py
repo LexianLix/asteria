@@ -3,6 +3,7 @@ import unittest
 from pathlib import Path
 from paper_reader.scientific import detect_regions, preserve_regions, word_lines
 from paper_reader.reader import extract_document
+from public_samples import resnet_pdf
 
 
 class Candidate:
@@ -55,7 +56,7 @@ class NestedTableTest(unittest.TestCase):
         self.assertEqual(len(regions), 2)
 
     def test_real_wide_tables_retain_all_24_columns_and_ambiguous_header_is_gated(self):
-        path = Path(__file__).resolve().parents[1] / 'data/parser-qa/reading-order/resnet-1512.03385.pdf'
+        path = resnet_pdf()
         if not path.is_file(): self.skipTest('Optional pinned public PDF unavailable')
         page = extract_document(path, page_range=(11, 11))['pages'][0]
         tables = [r for r in page['scientific_regions'] if r['kind'] == 'table']

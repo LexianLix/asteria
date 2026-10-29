@@ -10,6 +10,7 @@ import { installChatGPT } from '/assets/chatgpt.js';
 import { sourceSyncControl } from '/assets/source-status.js';
 import { installClassification } from '/assets/classification.js';
 import { installTranslationStatus, translationJobState, translationPageMessage } from '/assets/translation-status.js';
+import { installReadingQuality } from '/assets/reading-quality.js';
 pdfjs.GlobalWorkerOptions.workerSrc = '/assets/vendor/pdfjs/pdf.worker.mjs';
 
 const $ = (id) => document.getElementById(id);
@@ -284,6 +285,7 @@ function updateControls() {
   $('note-page').textContent = `关联第 ${state.page + 1} 页`; $('zoom-level').textContent = Math.round(state.zoom * 100) + '%';
   $('page-stage').classList.toggle('drawing', state.tool !== 'read');
   $('notes-panel').hidden = !state.notesOpen; $('notes-toggle').setAttribute('aria-expanded', String(state.notesOpen));
+  readingQuality.update();
 }
 async function loadDocument() {
   if (state.doc) return state.doc;
@@ -381,7 +383,8 @@ function renderText() {
     flow.append(node('p', 'page-kicker', `第 ${page.number + 1} 页 / ${state.total} · ${isChinese() ? '中文阅读' : '原文文字'}`));
     const placement = regionPlacement(page);
     if (page.reading_source) flow.append(node('p', 'parse-warning', '本页采用人工核对正文 · 原文与位置仍需核对；可在增强解析中切换旧版本。'));
-    if (!page.blocks.length) flow.append(node('p', 'page-empty', '这一页没有可提取文字。可查看原 PDF，或通过增强解析与 OCR 核对并采用正文。'));
+    readingQuality.appendPageNotice(flow, page.number);
+    if (!page.blocks.length && !state.doc.reading_quality) flow.append(node('p', 'page-empty', '这一页没有可提取文字。可查看原 PDF，或通过增强解析与 OCR 核对并采用正文。'));
     if (isChinese()) {
       const status = state.doc.translation_status?.pages.find(item => item.page_number === page.number);
       const message = translationPageMessage(status);
@@ -727,6 +730,8 @@ async function openTranslation(scope = 'all', force = false) {
   if (!state.paper?.local_pdf_path) { toast('请先下载 PDF，再翻译全文'); return; }
   try {
     const target = { id: state.paper.id, version: state.loadVersion, page: state.page };
+    await loadDocument();
+    if (target.id !== state.paper?.id || target.version !== state.loadVersion) return;
     state.config = await api('/desktop/config');
     if (target.id !== state.paper?.id || target.version !== state.loadVersion) return;
     state.translationTarget = target;
@@ -737,6 +742,7 @@ async function openTranslation(scope = 'all', force = false) {
       : state.config.provider === 'chatgpt' ? `Using ChatGPT plan · ${state.config.chatgpt_label}。使用 ${state.config.model}，将所选论文正文发送到 OpenAI 官方服务；使用你的套餐或已授权额度。`
       : `使用 ${state.config.model}，将论文正文发送到 ${state.config.base_url}。远程服务可能收取费用。`;
     $('confirm-description').textContent += ' 默认只补齐未译项，保留已有译文；勾选强制重译才重新发送整页。公式候选保留原式，识别表格的文字单元格单独翻译，纯数值不发送；检测可能漏项，请核对原文。';
+    readingQuality.translationWarning();
     $('confirm-dialog').showModal();
   } catch (error) { toast(error.message, true); }
 }
@@ -824,7 +830,13 @@ $('save-edit').onclick = async () => {
   const target = state.editTarget; if (!target) return;
   try {
     await api(`/desktop/papers/${target.paperId}/editor`, 'PATCH', { block_id: target.id, zh: $('edit-zh').value });
-    if (target.paperId === state.paper?.id) { state.editor = await api(`/desktop/papers/${target.paperId}/editor`); renderText(); }
+    if (target.paperId === state.paper?.id) {
+      const version = state.loadVersion;
+      const [editor, doc] = await Promise.all([api(`/desktop/papers/${target.paperId}/editor`), api(`/desktop/papers/${target.paperId}/document`)]);
+      if (target.paperId === state.paper?.id && version === state.loadVersion) {
+        state.editor = editor; state.doc = doc; updateJob(); renderText();
+      }
+    }
     $('edit-dialog').close(); toast('手动译文已保存；重译不会覆盖');
   } catch (error) { toast(error.message, true); }
 };
@@ -1037,7 +1049,8 @@ const discovery = installDiscovery({ state, $, node, api, toast, selectPaper });
 const scientific = installScientific({ state, $, node, api, toast, loadDocument, locateBlock, renderPage, openTranslation });
 const complex = installComplex({ state, $, node, api, toast, locateBlock, renderPage, renderCrop: scientific.renderCrop, openZoom: scientific.openZoom });
 installReviewed({ state, $, node, api, toast, renderCrop: scientific.renderCrop, renderPage, renderNotes });
-installTranslationStatus({ state, $, node, api, toast, updateJob, gotoPage, refresh: renderPage });
+installTranslationStatus({ state, $, node, api, toast, updateJob, gotoPage, locateBlock, refresh: renderPage });
+const readingQuality = installReadingQuality({ state, $, node, api, toast, loadDocument, locateBlock, gotoPage });
 const trayLabel = node('label', 'check-label'), trayInput = node('input');
 trayInput.id = 'close-to-tray'; trayInput.type = 'checkbox';
 trayLabel.append(trayInput, document.createTextNode('关闭窗口时驻留托盘，继续后台任务'));

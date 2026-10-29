@@ -1,0 +1,12 @@
+.reading-quality-dialog { width: min(720px, 94vw); }
+.reading-quality-summary { padding-block: 14px; border-block: 1px solid var(--line); font-size: 14px; line-height: 1.8; }
+.reading-quality-pages { max-height: 48vh; overflow: auto; margin-top: 20px; }
+.reading-quality-row { display: grid; grid-template-columns: 70px minmax(0, 1fr); width: 100%; gap: 8px 14px; padding: 16px 4px; text-align: left; border-bottom: 1px solid var(--line); line-height: 1.8; }
+.reading-quality-row strong { font-size: 12px; color: var(--ink); }
+.reading-quality-row span { overflow-wrap: anywhere; font-size: 12px; color: var(--muted); }
+.reading-quality-row small { grid-column: 2; color: var(--blue); }
+.reading-quality-notice { margin-block: 16px; padding: 14px 16px; border-left: 2px solid #aa7c45; background: #faf6ee; font: 12px/1.9 var(--sans); color: #795a34; }
+.reading-quality-notice p { margin: 0 0 8px; }
+.reading-quality-notice button { color: inherit; }
+#reading-quality-button { flex-shrink: 0; padding: 2px 8px; font-size: 11px; }
+@media (max-width: 540px) { .reading-quality-row { grid-template-columns: minmax(0, 1fr); } .reading-quality-row small { grid-column: 1; } }

@@ -9,6 +9,7 @@ export function translationJobState(job = {}, status) {
       : status.missing_text || status.missing_local ? '上次任务已结束 · 当前译文缓存仍有缺项'
       : status.no_text_pages ? '已提取内容缓存齐全 · 部分页面无可提取文字' : '已提取内容的译文缓存齐全';
   }
+  if (!active && status?.review_items) label += `${label ? ' · ' : ''}${status.review_items} 项数字、引用或上下标差异待核对`;
   const progress = !active && status ? `缓存齐全 ${status.complete_pages} / ${status.total_pages} 页`
     : job.total ? `${job.done || 0} / ${job.total} 页` : '';
   const hasCache = job.status === 'done' || status?.complete_pages > 0 || status?.pages?.some(page => page.cached > 0);
@@ -20,11 +21,12 @@ export function translationJobState(job = {}, status) {
 export function translationPageMessage(page) {
   if (!page) return '尚未检查本页译文完整性，可打开“译文检查”。';
   if (page.state === 'blocked') return '本页无法安全检查，请先核对正文；未自动修改译文。';
-  if (['complete', 'no_text'].includes(page.state)) return '';
-  return `本页缓存尚有缺项：${page.missing_text} 项文字待翻译，${page.missing_local} 项数字或保护原文可本地补齐。打开“译文检查”查看；未译内容仍显示原文。`;
+  const review = page.review_items?.length ? `本页有 ${page.review_items.length} 项数字、引用或上下标差异；打开“译文检查”定位并核对原文。` : '';
+  if (['complete', 'no_text'].includes(page.state)) return review;
+  return `本页缓存尚有缺项：${page.missing_text} 项文字待翻译，${page.missing_local} 项数字或保护原文可本地补齐。打开“译文检查”查看；未译内容仍显示原文。${review}`;
 }
 
-export function installTranslationStatus({ state, $, node, api, toast, refresh, updateJob, gotoPage }) {
+export function installTranslationStatus({ state, $, node, api, toast, refresh, updateJob, gotoPage, locateBlock }) {
   const button = node('button', 'plain', '译文检查'); button.id = 'translation-check-button';
   button.type = 'button'; $('glossary-button').after(button);
   const dialog = node('dialog', 'translation-check-dialog'); dialog.id = 'translation-check-dialog';
@@ -34,7 +36,7 @@ export function installTranslationStatus({ state, $, node, api, toast, refresh, 
   close.onclick = () => dialog.close(); header.append(title, close);
   const summary = node('p', 'translation-check-summary'); summary.id = 'translation-check-summary';
   summary.setAttribute('role', 'status'); summary.setAttribute('aria-live', 'polite');
-  const notice = node('p', 'muted', '这里只检查当前正文与表格的缓存是否齐全，不代表译文准确。补齐本地项不会调用模型，不会覆盖已有非空译文、手动修改或笔记。');
+  const notice = node('p', 'muted', '检查当前正文与表格的缓存缺项，并提示数字、引用或上下标差异；采用当前手动译文进行核对，不代表语义准确。补齐本地项不会调用模型，不会覆盖已有非空译文、手动修改或笔记。');
   const list = node('div', 'translation-check-pages'); list.id = 'translation-check-pages';
   const actions = node('div', 'dialog-actions');
   const repair = node('button', 'primary', '补齐数字与保护原文'); repair.id = 'repair-local-translation'; repair.type = 'button';
@@ -46,14 +48,21 @@ export function installTranslationStatus({ state, $, node, api, toast, refresh, 
     list.replaceChildren();
     summary.textContent = `缓存齐全 ${status.complete_pages} / ${status.total_pages} 页 · 文字待翻译 ${status.missing_text} 项 · 可本地补齐 ${status.missing_local} 项`;
     if (status.blocked_pages) summary.textContent += ` · ${status.blocked_pages} 页需核对正文`;
-    const gaps = status.pages.filter(page => page.state !== 'complete');
+    if (status.review_items) summary.textContent += ` · ${status.review_items} 项差异待核对`;
+    const gaps = status.pages.filter(page => page.state !== 'complete' || page.review_items?.length);
     for (const page of gaps) {
       const row = node('button', 'translation-check-row'); row.type = 'button';
       row.append(node('span', '', `第 ${page.page_number + 1} 页`), node('span', 'muted',
         page.state === 'no_text' ? '无可提取文字，请查看原 PDF 或核对 OCR'
           : page.state === 'blocked' ? '保护信息需核对，未自动修复'
-          : `待翻译 ${page.missing_text} 项 · 本地可补齐 ${page.missing_local} 项`));
-      row.onclick = () => { if (current()) { dialog.close(); gotoPage(page.page_number); } };
+          : `${page.state === 'complete' ? '缓存齐全' : `待翻译 ${page.missing_text} 项 · 本地可补齐 ${page.missing_local} 项`}${page.review_items?.length ? ` · ${page.review_items.length} 项差异待核对` : ''}`));
+      row.title = (page.review_items || []).flatMap(item => item.warnings).join('；');
+      row.onclick = () => {
+        if (!current()) return;
+        dialog.close();
+        const block = state.doc?.pages.find(item => item.number === page.page_number)?.blocks.find(item => item.id === page.review_items?.[0]?.id);
+        Promise.resolve(block && locateBlock ? locateBlock(page.page_number, block) : gotoPage(page.page_number)).catch(error => toast(error.message, true));
+      };
       list.append(row);
     }
     if (!gaps.length) list.append(node('p', 'muted', '当前提取内容的缓存项已齐全。专业术语、公式、数据与译文含义仍请对照原文核对。'));

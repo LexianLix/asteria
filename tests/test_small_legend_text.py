@@ -5,8 +5,9 @@ import unittest
 from unittest.mock import patch
 from pdfplumber.utils import extract_words
 from paper_reader.reader import extract_document, file_hash, refine_text_words
+from public_samples import resnet_pdf
 
-PDF = Path(__file__).resolve().parents[1] / 'data/parser-qa/reading-order/resnet-1512.03385.pdf'
+PDF = resnet_pdf()
 DIGEST = '1e0651b6810ecba34a3dbc5b5b0209226f889004607c1f203540a48d64e5a93a'
 
 

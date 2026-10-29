@@ -1,15 +1,14 @@
 """Inferred headings must not turn numeric body text into a TOC entry."""
 from copy import deepcopy
-from contextlib import closing
 from pathlib import Path
 import hashlib
 import json
-import sqlite3
 import unittest
 from unittest.mock import patch
 
 from paper_reader.reader import add_outline, extract_document
 import test_desktop as fixtures
+from public_samples import resnet_pdf
 
 
 class OutlineQualityTest(unittest.TestCase):
@@ -43,7 +42,7 @@ class OutlineQualityTest(unittest.TestCase):
         self.assertEqual([entry['id'] for entry in doc['outline']], ['title'])
 
     def test_real_appendix_headings_not_numeric_body(self):
-        source = Path(__file__).resolve().parents[1] / 'data/parser-qa/reading-order/resnet-1512.03385.pdf'
+        source = resnet_pdf()
         if not source.is_file(): self.skipTest('Pinned public parser sample not present')
         doc = extract_document(source, page_range=(10, 10))
         source_blocks = [(b['id'], b['en'], deepcopy(b['box'])) for b in doc['pages'][0]['blocks']]
@@ -52,18 +51,13 @@ class OutlineQualityTest(unittest.TestCase):
             ['A. Object Detection Baselines', 'B. Object Detection Improvements'])
         self.assertEqual([(b['id'], b['en'], b['box']) for b in doc['pages'][0]['blocks']], source_blocks)
 
-    def test_retained_real_translation_cache_is_not_rewritten(self):
-        project = Path(__file__).resolve().parents[1]
-        source = project / 'data/parser-qa/reading-order/resnet-1512.03385.pdf'
-        database = project / 'data/desktop-qa/full-translation/resnet/data/database.sqlite'
-        if not source.is_file() or not database.is_file(): self.skipTest('Retained local real-cache QA fixture not present')
+    def test_public_document_with_seeded_translation_cache_is_not_rewritten(self):
+        source = resnet_pdf()
+        if not source.is_file(): self.skipTest('Pinned public parser sample not present')
         digest = lambda value: hashlib.sha256(json.dumps(value, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
-        before_file = hashlib.sha256(database.read_bytes()).hexdigest()
-        with closing(sqlite3.connect(database.resolve().as_uri() + '?mode=ro', uri=True)) as connection:
-            records = [json.loads(row[0]) for row in connection.execute('SELECT payload FROM reader_data WHERE kind=?', ('document',))]
-        documents = [d for d in records if d.get('source_hash') == hashlib.sha256(source.read_bytes()).hexdigest()]
-        self.assertEqual(len(documents), 1)
-        document = documents[0]
+        document = extract_document(source)
+        for page in document['pages']:
+            page['translated'] = {block['id']: 'Regression fixture translation: ' + block['en'] for block in page['blocks']}
         self.assertEqual(len(document['pages']), 12)
         self.assertTrue(all(page.get('translated') for page in document['pages']))
         def protected(value):
@@ -76,7 +70,6 @@ class OutlineQualityTest(unittest.TestCase):
         original = digest(protected(document))
         add_outline(document, source_path=source)
         self.assertEqual(digest(protected(document)), original)
-        self.assertEqual(hashlib.sha256(database.read_bytes()).hexdigest(), before_file)
 
 
 class OutlineCacheTest(unittest.TestCase):

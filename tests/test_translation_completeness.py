@@ -12,6 +12,23 @@ class TranslationCompletenessTest(unittest.TestCase):
     tearDown = fixtures.MissingTranslationTest.tearDown
     table = fixtures.MissingTranslationTest.table
 
+    def test_complete_cache_still_exposes_numeric_differences_and_respects_manual_edit(self):
+        for page in self.doc['pages']:
+            page['translated'] = {block['id']: block['en'] for block in page['blocks']}
+        target = self.doc['pages'][0]['blocks'][0]
+        target['en'] = 'The metric is 12 [3].'
+        self.doc['pages'][0]['translated'][target['id']] = '指标为 21 [4]。'
+        self.db.reader_put(self.pid, 'document', self.doc)
+        original = deepcopy(self.doc)
+        result = self.client.get(f'/desktop/papers/{self.pid}/document').json()['translation_status']
+        self.assertEqual(result['pages'][0]['state'], 'complete')
+        self.assertEqual(result['review_items'], 1)
+        self.assertEqual(result['pages'][0]['review_items'][0]['id'], target['id'])
+        self.db.reader_put(self.pid, 'editor', {'edits': {target['id']: {'zh': '指标为 12 [3]。'}}})
+        result = self.client.get(f'/desktop/papers/{self.pid}/document').json()['translation_status']
+        self.assertEqual(result['review_items'], 0)
+        self.assertEqual(self.db.reader_get(self.pid, 'document'), original)
+
     def seed_gaps(self):
         self.table([['Accuracy', '62.1', '-']])
         self.db.reader_put(self.pid, 'document', self.doc)

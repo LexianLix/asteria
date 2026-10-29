@@ -39,3 +39,9 @@ test('partially cached pages report both kinds of gaps instead of showing silenc
   assert.equal(translationPageMessage({ state: 'complete' }), '');
   assert.match(translationPageMessage({ state: 'blocked' }), /核对正文/);
 });
+
+test('complete caches still surface literal differences for review', () => {
+  const status = { ...partial, complete_pages: 12, missing_text: 0, missing_local: 0, review_items: 2 };
+  assert.match(translationJobState({ status: 'done' }, status).label, /2 项.*差异待核对/);
+  assert.match(translationPageMessage({ state: 'complete', review_items: [{ id: 'a' }] }), /1 项/);
+});

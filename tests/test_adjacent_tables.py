@@ -8,6 +8,7 @@ from pathlib import Path
 from reportlab.pdfgen import canvas
 from paper_reader.reader import extract_document
 from paper_reader.scientific import preserve_regions, translation_input
+from public_samples import resnet_pdf
 
 
 def adjacent_tables_pdf(*, captions_above=False):
@@ -56,7 +57,7 @@ class AdjacentTablesTest(unittest.TestCase):
             self.assertIn({'id': block['id'], 'en': block['en']}, source)
 
     def test_fixed_resnet_caption_exposed_without_changing_old_cache(self):
-        pdf = Path(__file__).resolve().parents[1] / 'data/parser-qa/reading-order/resnet-1512.03385.pdf'
+        pdf = resnet_pdf()
         if not pdf.is_file():
             self.skipTest('Optional public ResNet regression PDF not downloaded')
         fresh = extract_document(pdf, page_range=(6, 6))

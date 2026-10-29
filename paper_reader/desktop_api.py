@@ -18,6 +18,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 
 from .reader import ReaderBusyError, ReaderService, PARSER_VERSION, SCIENTIFIC_VERSION, file_hash, pdf_path, quality_warnings, translation_cache_status
+from .reading_quality import reading_quality
 from . import __version__
 from .complex_service import ComplexParserService
 from .reviewed_reading import ReviewedReadingService
@@ -612,7 +613,8 @@ def install_desktop(app: FastAPI, settings: Settings, db: Database) -> ReaderSer
         require_paper(paper_id)
         try:
             doc = service.document(paper_id)
-            return {**doc, 'translation_status': translation_cache_status(doc)}
+            return {**doc, 'translation_status': translation_cache_status(doc, db.reader_get(paper_id, 'editor')),
+                    'reading_quality': reading_quality(doc)}
         except Exception as exc:
             raise HTTPException(422, f"无法解析 PDF：{exc}") from exc
 
