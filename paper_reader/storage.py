@@ -588,6 +588,8 @@ class Database:
                 value = json.loads(row[1])
                 if value.get("status") in ("queued", "running", "cancelling"):
                     message = ("上次摘要与分类已中断；需重新授权继续，已完成结果保留" if row[0] == 'classification' else
+                               "上次自动采集已中断；可手动重新采集，本机文献仍保留" if row[0] == 'daily-sync' else
+                               "上次采集已中断；可手动重新采集，本机文献仍保留" if row[0] == 'desktop-sync' else
                                "上次索引已中断；可点击继续，已完成文献的索引与进度仍保留" if row[0] == 'index-fulltext' else
                                "上次运行已中断；可点击继续，已完成的译文仍保留")
                     value.update(status="paused", error=message)

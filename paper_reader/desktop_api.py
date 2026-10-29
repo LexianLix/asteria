@@ -441,8 +441,9 @@ def install_desktop(app: FastAPI, settings: Settings, db: Database) -> ReaderSer
     @app.get("/desktop/overview")
     def overview():
         rows = db.overview_records()
-        sources = requested_sources(service.config().get('sync_source', 'arxiv'))
-        jobs = db.jobs_get(['desktop-sync', 'classification', *['source-cooldown:' + source for source in sources]])
+        cfg = service.config()
+        sources = requested_sources(cfg.get('sync_source', 'arxiv'))
+        jobs = db.jobs_get(['desktop-sync', 'classification', 'daily-sync', *['source-cooldown:' + source for source in sources]])
         groups = grouped_records(rows)
         tags = {}
         favorites = 0
@@ -459,6 +460,7 @@ def install_desktop(app: FastAPI, settings: Settings, db: Database) -> ReaderSer
         return {"total": len(groups), 'source_records': len(rows), "downloaded": sum(any(r['local_pdf_path'] for r in group) for group in groups), "starred": favorites,
                 "tags": tags, "folders": sorted(folders), "statuses": statuses,
                 "sync_job": jobs['desktop-sync'],
+                'daily_sync': jobs['daily-sync'], 'daily_enabled': cfg['daily_enabled'], 'daily_time': cfg['daily_time'],
                 'sync_cooldown': source_cooldowns.active(sources, jobs),
                 "classification_job": jobs['classification'], "sync_runs": db.list_sync_runs(5)}
 
@@ -981,7 +983,7 @@ def install_desktop(app: FastAPI, settings: Settings, db: Database) -> ReaderSer
         items = []
         for row in rows:
             key, job = row[0], json.loads(row[1])
-            if key.startswith('source-cooldown:'):
+            if key == 'daily-sync' or key.startswith('source-cooldown:'):
                 continue  # Derived gate; the user-facing sync job carries its error/deadline.
             paper_job = key.startswith(('translate:', 'complex:'))
             paper = db.get_paper(int(key.split(":", 1)[1])) if paper_job else None
@@ -1059,7 +1061,7 @@ def install_desktop(app: FastAPI, settings: Settings, db: Database) -> ReaderSer
                 raise HTTPException(409, '请先核对发送范围并授权摘要与分类')
             return classifier.start()
 
-    def run_sync(value: DesktopSync):
+    def run_sync(value: DesktopSync, daily_date=None):
         try:
             fn = {"arxiv": sync_arxiv, "openalex": sync_openalex, "all": sync_all}[value.source]
             # Desktop classification uses only the explicitly authorized saved
@@ -1081,9 +1083,17 @@ def install_desktop(app: FastAPI, settings: Settings, db: Database) -> ReaderSer
         except Exception as exc:
             db.job_put("desktop-sync", {"status": "failed", "error": str(exc), "updated_at": utc_now()})
         finally:
-            sync_lock.release()
+            try:
+                if daily_date:
+                    latest = db.job_get('desktop-sync')
+                    daily = db.job_get('daily-sync')
+                    if daily.get('date') == daily_date:
+                        db.job_put('daily-sync', {**daily, 'status': latest['status'], 'error': latest.get('error'),
+                            'updated_at': utc_now()})
+            finally:
+                sync_lock.release()
 
-    def start_sync(value: DesktopSync):
+    def start_sync(value: DesktopSync, daily_date=None):
         if sync_lock.acquire(blocking=False):
             handed_off = False
             try:
@@ -1092,7 +1102,10 @@ def install_desktop(app: FastAPI, settings: Settings, db: Database) -> ReaderSer
                     db.job_put('desktop-sync', source_cooldowns.failed_job(cooldown, value.source))
                     return {**db.job_get('desktop-sync'), 'attempt_started': False}
                 db.job_put("desktop-sync", {"status": "running", "source": value.source, "updated_at": utc_now()})
-                threading.Thread(target=run_sync, args=(value,), daemon=True).start()
+                if daily_date:
+                    db.job_put('daily-sync', {'date': daily_date, 'status': 'running', 'source': value.source,
+                        'started_at': utc_now(), 'updated_at': utc_now()})
+                threading.Thread(target=run_sync, args=(value, daily_date), daemon=True).start()
                 handed_off = True
                 return {**db.job_get('desktop-sync'), 'attempt_started': True}
             finally:
@@ -1104,7 +1117,7 @@ def install_desktop(app: FastAPI, settings: Settings, db: Database) -> ReaderSer
     def sync(value: DesktopSync):
         return start_sync(value)
 
-    def scheduler_tick(now: datetime | None = None):
+    def scheduler_tick(now: datetime | None = None, *, include_backup=True):
         # Exposed on app.state only for deterministic scheduler tests, not as an HTTP API.
         with service._lock:
             if app.state.maintenance:
@@ -1114,10 +1127,8 @@ def install_desktop(app: FastAPI, settings: Settings, db: Database) -> ReaderSer
             today = current.strftime("%Y-%m-%d")
             if cfg["daily_enabled"] and current.strftime("%H:%M") >= cfg["daily_time"]:
                 if db.job_get("daily-sync").get("date") != today and not sync_lock.locked():
-                    job = start_sync(DesktopSync(source=cfg["sync_source"]))
-                    if job.get('attempt_started'):
-                        db.job_put("daily-sync", {"date": today})
-            if cfg["auto_backup"] and db.job_get("auto-backup").get("date") != today:
+                    start_sync(DesktopSync(source=cfg["sync_source"]), daily_date=today)
+            if include_backup and cfg["auto_backup"] and db.job_get("auto-backup").get("date") != today:
                 db.job_put("auto-backup", {"status": "running", "updated_at": utc_now()})
                 result = backups.create(automatic=True)
                 db.job_put("auto-backup", {"date": today, "status": "done", "updated_at": utc_now(), **result})
@@ -1125,6 +1136,12 @@ def install_desktop(app: FastAPI, settings: Settings, db: Database) -> ReaderSer
     app.state.scheduler_tick = scheduler_tick
 
     def scheduler():
+        # Catch up today's due collection immediately; keep large backups on the
+        # regular background tick instead of delaying the initial reading view.
+        try:
+            scheduler_tick(include_backup=False)
+        except Exception as exc:
+            db.job_put('scheduler-error', {'status': 'failed', 'error': str(exc), 'updated_at': utc_now()})
         while not stop.wait(30):
             try:
                 scheduler_tick()
