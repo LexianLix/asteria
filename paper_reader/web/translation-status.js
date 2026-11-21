@@ -5,7 +5,8 @@ export function translationJobState(job = {}, status) {
     paused: '翻译已暂停', partial: '部分页面尚未完成', failed: '翻译失败' };
   let label = labels[job.status] || '';
   if (job.status === 'done') {
-    label = !status ? '上次翻译任务已结束' : status.blocked_pages ? '上次任务已结束 · 有页面需要核对正文'
+    label = job.scope === 'blocks' ? '选段重译已完成'
+      : !status ? '上次翻译任务已结束' : status.blocked_pages ? '上次任务已结束 · 有页面需要核对正文'
       : status.missing_text || status.missing_local ? '上次任务已结束 · 当前译文缓存仍有缺项'
       : status.no_text_pages ? '已提取内容缓存齐全 · 部分页面无可提取文字' : '已提取内容的译文缓存齐全';
   }
@@ -26,7 +27,7 @@ export function translationPageMessage(page) {
   return `本页缓存尚有缺项：${page.missing_text} 项文字待翻译，${page.missing_local} 项数字或保护原文可本地补齐。打开“译文检查”查看；未译内容仍显示原文。${review}`;
 }
 
-export function installTranslationStatus({ state, $, node, api, toast, refresh, updateJob, gotoPage, locateBlock }) {
+export function installTranslationStatus({ state, $, node, api, toast, refresh, updateJob, gotoPage, locateBlock, openTranslation }) {
   const button = node('button', 'plain', '译文检查'); button.id = 'translation-check-button';
   button.type = 'button'; $('glossary-button').after(button);
   const dialog = node('dialog', 'translation-check-dialog'); dialog.id = 'translation-check-dialog';
@@ -64,6 +65,22 @@ export function installTranslationStatus({ state, $, node, api, toast, refresh, 
         Promise.resolve(block && locateBlock ? locateBlock(page.page_number, block) : gotoPage(page.page_number)).catch(error => toast(error.message, true));
       };
       list.append(row);
+      for (const item of page.review_items || []) {
+        const entry = node('div', 'translation-review-item');
+        entry.append(node('p', '', item.source), node('small', 'muted', item.warnings.join('、')));
+        if (item.retranslatable) {
+          const retry = node('button', 'secondary', '仅重译此段');
+          retry.type = 'button';
+          retry.disabled = ['queued', 'running', 'cancelling'].includes(state.job.status);
+          retry.onclick = () => {
+            if (!current()) return;
+            dialog.close();
+            openTranslation('blocks', false, { page: page.page_number, id: item.id, source: item.source, hash: state.doc.source_hash });
+          };
+          entry.append(retry);
+        }
+        list.append(entry);
+      }
     }
     if (!gaps.length) list.append(node('p', 'muted', '当前提取内容的缓存项已齐全。专业术语、公式、数据与译文含义仍请对照原文核对。'));
     repair.disabled = working || !status.missing_local || !!status.blocked_pages

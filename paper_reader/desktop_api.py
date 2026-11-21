@@ -28,6 +28,7 @@ from .chatgpt_model import ChatGPTModelClient
 from .backup import BackupManager
 from .assistant import PaperAssistant, ContextRequest, AssistantRequest, FIELD_NAMES
 from .identity import normalize_doi, work_key
+from .library_exports import annotation_content, citation_export, notes_markdown
 from .discovery import grouped_records, daily_brief
 from .sources.errors import SourceError
 from .source_cooldowns import SourceCooldowns
@@ -138,9 +139,11 @@ class TopicsUpdate(BaseModel):
 
 
 class TranslationScope(BaseModel):
-    scope: Literal["all", "page", "failed"] = "all"
+    scope: Literal["all", "page", "failed", "blocks"] = "all"
     page_number: int | None = Field(default=None, ge=0)
     force: bool = False
+    block_ids: list[str] | None = Field(default=None, min_length=1, max_length=30)
+    source_hash: str | None = Field(default=None, pattern=r'^[a-f0-9]{64}$')
     chatgpt_account_id: str | None = Field(default=None, min_length=64, max_length=64)
     chatgpt_generation: int | None = Field(default=None, ge=0)
     chatgpt_model: str | None = Field(default=None, min_length=1, max_length=200)
@@ -148,6 +151,11 @@ class TranslationScope(BaseModel):
 
 class LocalTranslationRepair(BaseModel):
     page_number: int | None = Field(default=None, ge=0)
+
+
+class CitationExport(BaseModel):
+    paper_ids: list[int] = Field(min_length=1, max_length=200)
+    format: Literal['bibtex', 'ris']
 
 
 class SnippetRequest(BaseModel):
@@ -463,6 +471,29 @@ def install_desktop(app: FastAPI, settings: Settings, db: Database) -> ReaderSer
                 'daily_sync': jobs['daily-sync'], 'daily_enabled': cfg['daily_enabled'], 'daily_time': cfg['daily_time'],
                 'sync_cooldown': source_cooldowns.active(sources, jobs),
                 "classification_job": jobs['classification'], "sync_runs": db.list_sync_runs(5)}
+
+    @app.post('/desktop/citations/export')
+    def export_citations(request: CitationExport):
+        papers = [require_paper(paper_id) for paper_id in dict.fromkeys(request.paper_ids)]
+        extension = 'bib' if request.format == 'bibtex' else 'ris'
+        return Response(citation_export(papers, request.format), media_type='text/plain; charset=utf-8',
+                        headers={'Content-Disposition': f'attachment; filename="asteria-citations.{extension}"'})
+
+    @app.get('/desktop/notes')
+    def library_notes(q: str = Query('', max_length=200), paper: str = Query('', max_length=200),
+                      kind: Literal['note', 'text-highlight', 'ink', 'highlight'] | None = None,
+                      page: int = Query(1, ge=1, le=1_000_000)):
+        items, total = db.library_annotations(q.strip(), paper.strip(), kind, limit=30, offset=(page - 1) * 30)
+        return {'items': items, 'total': total, 'page': page}
+
+    @app.get('/desktop/notes.md')
+    def export_library_notes(q: str = Query('', max_length=200), paper: str = Query('', max_length=200),
+                             kind: Literal['note', 'text-highlight', 'ink', 'highlight'] | None = None):
+        items, total = db.library_annotations(q.strip(), paper.strip(), kind, limit=5000)
+        if total > len(items):
+            raise HTTPException(422, '每次最多导出 5000 条笔记，请按论文或关键词缩小范围')
+        return Response(notes_markdown(items), media_type='text/markdown; charset=utf-8',
+                        headers={'Content-Disposition': 'attachment; filename="asteria-notes.md"'})
 
     @app.get('/desktop/papers/{paper_id}/versions')
     def source_versions(paper_id: int):
@@ -807,7 +838,8 @@ def install_desktop(app: FastAPI, settings: Settings, db: Database) -> ReaderSer
         paper = require_paper(paper_id)
         lines = [f"# {paper['title']}", "", f"来源：{paper.get('abs_url') or paper['source']}", ""]
         for note in db.list_annotations(paper_id):
-            lines.extend([f"## 第 {note['page_number'] + 1} 页 · {note['annotation_type']}", note.get("text") or "（原页图形标注）", ""])
+            content, _ = annotation_content(note['annotation_type'], note.get('text'))
+            lines.extend([f"## 第 {note['page_number'] + 1} 页 · {note['annotation_type']}", content or "（原页图形标注）", ""])
         return Response("\n".join(lines), media_type="text/markdown; charset=utf-8",
                         headers={"Content-Disposition": f'attachment; filename="paper-{paper_id}-notes.md"'})
 

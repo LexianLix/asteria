@@ -34,6 +34,7 @@ class ComplexParserService:
         models = os.getenv('PAPER_READER_COMPLEX_MODELS', '')
         backend = os.getenv('PAPER_READER_COMPLEX_BACKEND', 'docling_parse')
         reason = None
+        missing = []
         if not interpreter or not models:
             reason = '尚未配置独立解析环境。请设置 PAPER_READER_COMPLEX_PYTHON 和 PAPER_READER_COMPLEX_MODELS 后重新启动。普通阅读不受影响。'
         elif not Path(interpreter).is_file() or not Path(models).is_dir():
@@ -46,12 +47,13 @@ class ComplexParserService:
             if ocr:
                 required += ['RapidOcr/ch_ppocr_mobile_v2.0_cls_mobile.onnx',
                              'RapidOcr/PP-OCRv6_det_small.onnx', 'RapidOcr/PP-OCRv6_rec_small.onnx']
-            if any(not (Path(models) / name).is_file() for name in required):
+            missing = [name for name in required if not (Path(models) / name).is_file()]
+            if missing:
                 reason = '本地布局、表格或英文 OCR 模型不完整；程序不会自动联网下载，请先准备模型。'
         warning = '可选 CPU 增强，可能占用约 1.5 GB 内存；独立预览不自动替换已保存正文。'
         if ocr:
             warning += ' 英文扫描 OCR 固定使用 PDFium 渲染；识别结果仍需核对原页。'
-        return {'available': reason is None, 'reason': reason, 'backend': effective_backend(backend, ocr),
+        return {'available': reason is None, 'reason': reason, 'missing_models': missing, 'backend': effective_backend(backend, ocr),
                 'configured_backend': backend,
                 'ocr_language': '英文', 'network': '不调用远程推理；Python 连接边界禁止联网',
                 'warning': warning}

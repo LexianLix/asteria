@@ -634,6 +634,36 @@ class Database:
             result.append(item)
         return result
 
+    def library_annotations(self, keyword, paper, kind, *, limit, offset=0):
+        """Page through annotations without loading page drawings or PDF text."""
+        from .library_exports import annotation_content
+
+        conditions, values = [], []
+        if keyword:
+            quote = """CASE WHEN a.annotation_type='text-highlight' AND json_valid(a.text)
+                       THEN COALESCE(json_extract(a.text, '$.quote'), a.text) ELSE a.text END"""
+            conditions.append(f"instr(lower(COALESCE(({quote}), '')), lower(?)) > 0")
+            values.append(keyword)
+        if paper:
+            conditions.append('instr(lower(p.title), lower(?)) > 0')
+            values.append(paper)
+        if kind:
+            conditions.append('a.annotation_type = ?')
+            values.append(kind)
+        where = ' WHERE ' + ' AND '.join(conditions) if conditions else ''
+        source = ' FROM annotations AS a JOIN papers AS p ON p.id = a.paper_id' + where
+        with self._lock:
+            count = self._connection.execute('SELECT COUNT(*)' + source, values).fetchone()[0]
+            rows = self._connection.execute(
+                'SELECT a.id, a.paper_id, a.page_number, a.annotation_type, a.text, a.updated_at, p.title AS paper_title'
+                + source + ' ORDER BY a.updated_at DESC, a.id DESC LIMIT ? OFFSET ?', [*values, limit, offset]).fetchall()
+        items = []
+        for row in rows:
+            item = dict(row)
+            item['content'], item['block_id'] = annotation_content(item['annotation_type'], item.pop('text'))
+            items.append(item)
+        return items, count
+
     def get_translation(self, paper_id: int, source_text: str, target_lang: str) -> dict[str, Any] | None:
         source_hash = hashlib.sha256(source_text.encode("utf-8")).hexdigest()
         with self._lock:

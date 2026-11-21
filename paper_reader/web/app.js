@@ -12,6 +12,7 @@ import { installClassification } from '/assets/classification.js';
 import { installTranslationStatus, translationJobState, translationPageMessage } from '/assets/translation-status.js';
 import { installReadingQuality } from '/assets/reading-quality.js';
 import { installWorkspace } from '/assets/workspace.js';
+import { installLibraryTools } from '/assets/library-tools.js';
 pdfjs.GlobalWorkerOptions.workerSrc = '/assets/vendor/pdfjs/pdf.worker.mjs';
 
 const $ = (id) => document.getElementById(id);
@@ -202,10 +203,11 @@ async function refreshLibrary() {
         catch (error) { toast(error.message, true); }
       }
     };
-    $('paper-list').append(button);
+    $('paper-list').append(libraryTools.addPaper(paper, button));
   }
   if (!result.items.length) $('paper-list').append(node('p', 'empty-list', $('search').value || state.tag || state.filter !== 'all' ? '没有匹配的文献。\n试试其他关键词或筛选条件。' : '文献库还是空的。\n点击“获取新论文”，或导入本地 PDF。'));
   workspace.updateResume();
+  libraryTools.updateSelection();
 }
 async function setFilter(filter, tag = '') {
   workspace.library();
@@ -755,22 +757,28 @@ $('topics-form').onsubmit = async event => {
   event.preventDefault(); const split = id => $(id).value.split('\n').map(s => s.trim()).filter(Boolean);
   try { await api('/desktop/topics', 'PUT', { categories: split('topic-categories'), keywords: split('topic-keywords') }); $('topics-dialog').close(); toast('采集方向已保存'); } catch (error) { $('topics-error').textContent = error.message; }
 };
-async function openTranslation(scope = 'all', force = false) {
+async function openTranslation(scope = 'all', force = false, block = null) {
   if (!state.paper?.local_pdf_path) { toast('请先下载 PDF，再翻译全文'); return; }
   try {
-    const target = { id: state.paper.id, version: state.loadVersion, page: state.page };
+    const target = { id: state.paper.id, version: state.loadVersion, page: block?.page ?? state.page, block };
     await loadDocument();
     if (target.id !== state.paper?.id || target.version !== state.loadVersion) return;
     state.config = await api('/desktop/config');
     if (target.id !== state.paper?.id || target.version !== state.loadVersion) return;
     state.translationTarget = target;
     target.chatgptBinding = state.config.provider === 'chatgpt' ? { chatgpt_account_id: state.config.chatgpt_account_id, chatgpt_generation: state.config.chatgpt_generation, chatgpt_model: state.config.model } : {};
-    $('translation-scope').value = scope; $('force-translate').checked = force;
+    $('translation-scope').closest('label').hidden = !!block;
+    $('force-translate').closest('label').hidden = !!block;
+    $('translation-scope').value = block ? 'page' : scope; $('force-translate').checked = force;
+    $('translation-block-preview').hidden = !block;
+    $('translation-block-preview').textContent = block ? `第 ${block.page + 1} 页 · 本次仅发送以下段落或表格单元格\n${block.source}` : '';
     $('confirm-description').textContent = state.config.provider === 'ollama'
       ? `使用本地模型 ${state.config.model}，正文发送到 ${state.config.base_url}。`
       : state.config.provider === 'chatgpt' ? `Using ChatGPT plan · ${state.config.chatgpt_label}。使用 ${state.config.model}，将所选论文正文发送到 OpenAI 官方服务；使用你的套餐或已授权额度。`
       : `使用 ${state.config.model}，将论文正文发送到 ${state.config.base_url}。远程服务可能收取费用。`;
-    $('confirm-description').textContent += ' 默认只补齐未译项，保留已有译文；勾选强制重译才重新发送整页。公式候选保留原式，识别表格的文字单元格单独翻译，纯数值不发送；检测可能漏项，请核对原文。';
+    $('confirm-description').textContent += block
+      ? ' 重译结果会写入此段的机器译文，手动修订仍优先显示。'
+      : ' 默认只补齐未译项，保留已有译文。勾选强制重译才重新发送整页。公式和数字请核对原文。';
     readingQuality.translationWarning();
     $('confirm-dialog').showModal();
   } catch (error) { toast(error.message, true); }
@@ -780,12 +788,17 @@ $('translate-page').onclick = () => openTranslation('page');
 $('confirm-cancel').onclick = $('confirm-close').onclick = () => $('confirm-dialog').close();
 $('confirm-translate').onclick = async () => {
   $('confirm-dialog').close();
-  const target = state.translationTarget; if (!target) return;
+  const target = state.translationTarget; state.translationTarget = null;
+  if (!target || target.id !== state.paper?.id || target.version !== state.loadVersion) return;
   const { id, version } = target;
   try {
-    const job = await api(`/desktop/papers/${id}/translation`, 'POST', { scope: $('translation-scope').value, page_number: target.page, force: $('force-translate').checked, ...target.chatgptBinding });
+    const scope = target.block ? { scope: 'blocks', block_ids: [target.block.id], source_hash: target.block.hash }
+      : { scope: $('translation-scope').value, force: $('force-translate').checked };
+    const job = await api(`/desktop/papers/${id}/translation`, 'POST', { ...scope, page_number: target.page, ...target.chatgptBinding });
     if (version !== state.loadVersion) return;
-    state.job = job; updateJob(); state.mode = 'zh'; await renderPage();
+    state.job = job; state.jobDone = 0; updateJob(); state.mode = 'zh';
+    if (target.block) { state.page = target.page; state.focusBlock = null; }
+    await renderPage();
   } catch (error) { toast(error.message, true); }
 };
 $('cancel-translation').onclick = async () => {
@@ -1049,11 +1062,13 @@ function trackReadingPosition() {
 $('reading-content').addEventListener('scroll', trackReadingPosition, { passive: true });
 $('text-page').addEventListener('scroll', trackReadingPosition, { passive: true });
 document.addEventListener('keydown', event => {
+  if (event.defaultPrevented || event.isComposing || document.querySelector('dialog[open]')) return;
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') { event.preventDefault(); workspace.library(); $('search').focus(); }
-  if (!['INPUT', 'TEXTAREA', 'SELECT'].includes(event.target.tagName) && !document.querySelector('dialog[open]')) {
-    if (event.key === 'ArrowRight') gotoPage(state.page + 1);
-    if (event.key === 'ArrowLeft') gotoPage(state.page - 1);
-  }
+  if (state.workspaceView !== 'reading' || event.ctrlKey || event.metaKey || event.altKey || event.shiftKey ||
+      event.target.closest?.('input, textarea, select, [contenteditable="true"]')) return;
+  if (event.key === 'Escape' && state.focus) { event.preventDefault(); $('focus-button').click(); }
+  if (event.key === 'ArrowRight') { event.preventDefault(); gotoPage(state.page + 1); }
+  if (event.key === 'ArrowLeft') { event.preventDefault(); gotoPage(state.page - 1); }
 });
 window.addEventListener('beforeunload', () => { try { rememberDraft(); assistant.remember(); persistOutbox(); } catch { /* Existing persisted data remains intact. */ } });
 let resizeTimer;
@@ -1079,10 +1094,35 @@ const discovery = installDiscovery({ state, $, node, api, toast, selectPaper });
 const scientific = installScientific({ state, $, node, api, toast, loadDocument, locateBlock, renderPage, openTranslation });
 const complex = installComplex({ state, $, node, api, toast, locateBlock, renderPage, renderCrop: scientific.renderCrop, openZoom: scientific.openZoom });
 installReviewed({ state, $, node, api, toast, renderCrop: scientific.renderCrop, renderPage, renderNotes });
-installTranslationStatus({ state, $, node, api, toast, updateJob, gotoPage, locateBlock, refresh: renderPage });
-const readingQuality = installReadingQuality({ state, $, node, api, toast, loadDocument, locateBlock, gotoPage });
+$('confirm-description').after(Object.assign(node('pre', 'scientific-raw'), { id: 'translation-block-preview', hidden: true }));
+installTranslationStatus({ state, $, node, api, toast, updateJob, gotoPage, locateBlock, openTranslation, refresh: renderPage });
+const readingQuality = installReadingQuality({ state, $, node, api, toast, loadDocument, locateBlock, gotoPage, openOcr: complex.open });
 const workspace = installWorkspace({ state, $, node, api, toast, selectPaper, renderPage,
   leaveReading: () => { rememberDraft(); assistant.remember(); queueReadingPosition(); endStroke(true); pdfFlow.dispose(); } });
+const libraryTools = installLibraryTools({ state, $, node, api, toast, workspace,
+  openNote: async (paper, note) => {
+    const version = state.loadVersion + 1;
+    await selectPaper(paper);
+    if (state.loadVersion !== version || state.paper?.id !== paper.id || state.workspaceView !== 'reading') return;
+    if (!state.pdf || note.page_number >= state.total) return toast('这条标注的原页已不可用。', true);
+    state.notesOpen = true;
+    await gotoPage(note.page_number);
+    if (note.annotation_type !== 'text-highlight' || !note.block_id || state.loadVersion !== version) return;
+    const doc = await loadDocument();
+    if (state.loadVersion !== version || state.workspaceView !== 'reading') return;
+    const block = doc?.pages[note.page_number]?.blocks.find(item => item.id === note.block_id);
+    if (block) await locateBlock(note.page_number, block);
+    else toast('已定位原页。该摘录来自其他正文版本。');
+  },
+});
+const readingOptions = node('details', 'reading-options');
+readingOptions.append(node('summary', '', '阅读设置'));
+const optionBody = node('div', 'reading-options-content');
+optionBody.append($('font-down'), $('font-up'), $('bilingual').closest('label'),
+  $('continuous').closest('label'), $('glossary-button'));
+readingOptions.append(optionBody);
+$('text-tools').append(readingOptions);
+$('focus-button').title = '专注阅读，按 Esc 退出';
 const trayLabel = node('label', 'check-label'), trayInput = node('input');
 trayInput.id = 'close-to-tray'; trayInput.type = 'checkbox';
 trayLabel.append(trayInput, document.createTextNode('关闭窗口时驻留托盘，继续后台任务'));

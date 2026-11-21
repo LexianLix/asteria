@@ -335,6 +335,13 @@ def translation_input(page):
         if any(not (0 <= s['start'] < s['end'] <= len(text)) for s in [*geometric, *numeric]):
             raise ValueError('复杂内容保护范围无效，请重新提取文档')
         ranges = [part for span in geometric for part in formula_translation_spans(text, span)]
+        # A model must not move numeric citations or ordinal values from a
+        # trailing sentence fragment into the following paragraph's translation.
+        ranges.extend({'start': match.start(), 'end': match.end()} for match in re.finditer(
+            r'\[\d+(?:\s*[,–-]\s*\d+)*\]', text))
+        ranks = {(match.start(), match.end()): f"第{match['rank']}名" for match in re.finditer(
+            r'(?<!\d)(?P<rank>\d+)(?:st|nd|rd|th)\s*places?(?=\b|onthe\b|int[he])', text, re.I)}
+        ranges.extend({'start': start, 'end': end} for start, end in ranks)
         for span in numeric:
             start, end = span['start'], span['end']
             match = PROSE_FOOTNOTE.fullmatch(text[start:end]) or LEADING_PROSE_FOOTNOTE.fullmatch(text[start:end])
@@ -378,7 +385,10 @@ def translation_input(page):
             if not (offset <= start < end <= len(text)):
                 raise ValueError('复杂内容保护范围无效，请重新提取文档')
             token = f'[[PR_KEEP_{nonce}_b{block_index}_{i}]]'
-            pieces.extend([text[offset:start], token]); keep[token] = text[start:end]; offset = end
+            rank = ranks.get((start, end))
+            pieces.extend([text[offset:start], f' {token} ' if rank else token])
+            keep[token] = rank or text[start:end]
+            offset = end
         pieces.append(text[offset:]); cleaned = ''.join(pieces)
         rest = cleaned
         for token in keep:

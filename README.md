@@ -30,12 +30,15 @@ Asteria 是一款本地优先的 AI 文献阅读工作台，将论文发现、�
 - 逐页检查当前译文缓存缺项，区分待翻译文字与可本地补齐的数字、保护原文；本地补齐不调用 AI。
 - 本地正文检查提示无文字、英文逐字拆分与无法解码的字形，可定位原页；翻译前按所选范围提醒异常页面。
 - 译文检查汇总数字、引用与上下标差异，支持定位原文，并按当前手动修订后的译文重新核对。
+- 在译文检查中选择有差异的段落，确认范围后单独重译。
 - 公式、图表和表格原页区域查看；可选本地增强解析与 OCR。
 
 ### 批注与知识整理
 
 - 在原文上手写圈画、区域高亮，在文字模式中选择文字高亮。
 - 页级笔记、草稿保存、笔记 Markdown 导出。
+- 在“我的笔记”中按论文、关键词和类型筛选已保存的笔记或摘录，跳回原页或导出当前筛选结果。
+- 在文献库选择多篇论文，或在阅读页导出单篇，支持 BibTeX 和 RIS。
 - 选段解释与论文问答，查看发送内容并通过引用返回原文。
 - 整理论文研究卡片，分别保存 AI 提取内容和个人想法。
 - 本地备份、导入验证与恢复，统一查看后台任务。
@@ -75,6 +78,21 @@ Asteria 是一款本地优先的 AI 文献阅读工作台，将论文发现、�
 - “缓存齐全”仅说明当前提取内容没有缺少缓存项，不代表译文准确或原文提取无遗漏。
 - 中文阅读采用结构化排版，不是保留原版式的中文版 PDF。扫描文档的增强解析与 OCR 需要另行准备本地解析环境和模型。
 - 论文来源与全文下载受原站点政策及论文许可约束；Asteria 不提供付费墙绕过功能。
+
+### 本地 OCR 配置
+
+英文扫描 PDF 可在“增强解析与 OCR”中识别。在 PowerShell 中创建独立环境并提前下载模型，然后从同一个窗口启动 Asteria。请将最后一行的路径换成自己的安装位置。
+
+```powershell
+py -3.12 -m venv C:\AsteriaOCR
+& C:\AsteriaOCR\Scripts\python.exe -m pip install "docling==2.151.1" "rapidocr==3.10.0" "onnxruntime==1.32.0" --extra-index-url https://download.pytorch.org/whl/cpu
+& C:\AsteriaOCR\Scripts\docling-tools.exe models download layout tableformer rapidocr --rapidocr-backend-lang onnxruntime:en --output-dir C:\AsteriaOCR\models
+$env:PAPER_READER_COMPLEX_PYTHON = 'C:\AsteriaOCR\Scripts\python.exe'
+$env:PAPER_READER_COMPLEX_MODELS = 'C:\AsteriaOCR\models'
+& 'C:\你的安装目录\Asteria.exe'
+```
+
+如果正在运行 Asteria，请先退出再启动。打开扫描页后选择“扫描页 OCR”，识别完成后打开“核对正文 / 切换版本”。载入增强候选，与原页对照确认阅读顺序和文字，再采用正文。解析失败时可按上次的页码和 OCR 模式重试。模型准备阶段需要联网，识别在本地运行。 [Docling 离线模型说明](https://docling-project.github.io/docling/usage/advanced_options/)
 
 ## 从源码运行
 

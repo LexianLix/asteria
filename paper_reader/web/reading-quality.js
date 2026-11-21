@@ -7,7 +7,7 @@ export function readingReviewMessage(status, pageNumbers = null) {
   return `第 ${numbers}${pages.length > 8 ? ' 等' : ''} 页存在提取异常或无可提取文字。请先通过“正文检查”核对原页；异常文字可能影响翻译，无文字页需先提取或 OCR。`;
 }
 
-export function installReadingQuality({ state, $, node, api, toast, loadDocument, locateBlock, gotoPage }) {
+export function installReadingQuality({ state, $, node, api, toast, loadDocument, locateBlock, gotoPage, openOcr }) {
   const button = node('button', 'plain', '正文检查'); button.id = 'reading-quality-button'; button.type = 'button';
   $('reader-status').after(button);
   const dialog = node('dialog', 'reading-quality-dialog'); dialog.id = 'reading-quality-dialog';
@@ -29,7 +29,7 @@ export function installReadingQuality({ state, $, node, api, toast, loadDocument
   }
   function translationWarning() {
     const scope = $('translation-scope').value, target = state.translationTarget;
-    const pages = scope === 'page' ? [target?.page] : scope === 'failed' ? state.doc?.pages.filter(page => page.error).map(page => page.number) || [] : null;
+    const pages = target?.block || scope === 'page' ? [target?.page] : scope === 'failed' ? state.doc?.pages.filter(page => page.error).map(page => page.number) || [] : null;
     warning.textContent = readingReviewMessage(state.doc?.reading_quality, pages); warning.hidden = !warning.textContent;
   }
   $('translation-scope').addEventListener('change', translationWarning);
@@ -69,6 +69,12 @@ export function installReadingQuality({ state, $, node, api, toast, loadDocument
     const view = node('button', 'plain', '核对原页'); view.type = 'button';
     view.onclick = () => { state.mode = 'pdf'; gotoPage(number).catch(error => toast(error.message, true)); };
     notice.append(view); flow.append(notice);
+    if (issues.some(issue => issue.code === 'no_text')) {
+      const ocr = node('button', 'plain', '扫描页 OCR');
+      ocr.type = 'button';
+      ocr.onclick = () => openOcr({ ocr: true, page: number });
+      notice.append(ocr);
+    }
   }
   return { update, translationWarning, appendPageNotice };
 }

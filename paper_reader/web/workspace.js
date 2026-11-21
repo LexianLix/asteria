@@ -31,6 +31,10 @@ export function installWorkspace({ state, $, node, api, toast, selectPaper, rend
     $('focus-button').textContent = '专注'; $('focus-button').setAttribute('aria-pressed', 'false');
     shell.dataset.view = view; todayButton.classList.toggle('active', view === 'today');
     todayButton.setAttribute('aria-current', view === 'today' ? 'page' : 'false');
+    const notesButton = $('my-notes-button');
+    notesButton?.classList.toggle('active', view === 'notes');
+    notesButton?.setAttribute('aria-current', view === 'notes' ? 'page' : 'false');
+    if (view === 'notes') document.querySelectorAll('[data-filter]').forEach(el => el.classList.remove('active'));
     return true;
   }
   function library() {
@@ -98,5 +102,5 @@ export function installWorkspace({ state, $, node, api, toast, selectPaper, rend
   $('today-prev').onclick = () => { page--; refreshToday(); };
   $('today-next').onclick = () => { page++; refreshToday(); };
   function overview(value) { $('daily-collection-status').textContent = dailyCollectionMessage(value, localDate()); updateResume(); }
-  return { library, reading, refreshToday, overview, updateResume };
+  return { library, reading, notes: () => show('notes'), refreshToday, overview, updateResume };
 }

@@ -6,9 +6,16 @@ export function installComplex({ state, $, node, api, toast, locateBlock, render
   dialog.innerHTML = `<div class="dialog-header"><h2>增强解析 · 原页核对</h2><div class="complex-header-actions"><button id="complex-fallback" class="secondary">继续原文阅读</button><button id="complex-close" class="icon-button" aria-label="关闭增强解析">×</button></div></div>
     <p class="muted">本地 CPU 模型，独立预览，不覆盖已保存正文、译文和笔记。合并表头、阅读顺序与科学符号仍需核对原 PDF。成功重跑会更新本预览，失败保留上次结果。</p>
     <p id="complex-runtime" class="muted"></p>
+    <details id="complex-setup"><summary>准备本地 OCR 环境</summary>
+      <ol><li>使用独立 Python 环境安装 Docling、RapidOCR 和 ONNX Runtime。</li>
+      <li>预下载版面、表格和英文 RapidOCR 模型。在启动 Asteria 的环境中指定 Python 和模型目录，再重新启动。</li>
+      <li>在原页核对识别完整性，从“核对正文 / 切换版本”采用已确认的内容。</li></ol>
+      <a href="https://github.com/LexianLix/asteria#本地-ocr-配置" target="_blank" rel="noopener noreferrer">查看配置命令 ↗</a>
+      <ul id="complex-missing-models"></ul>
+    </details>
     <div class="complex-controls"><label>起始页<input id="complex-start-page" type="number" min="1" value="1"></label><label>结束页<input id="complex-end-page" type="number" min="1" value="1"></label>
       <label class="check-label"><input id="complex-ocr" type="checkbox"> 英文扫描 OCR</label><button id="complex-start" class="primary" disabled>解析所选页</button><button id="complex-cancel" class="secondary" hidden>取消解析</button></div>
-    <p id="complex-status" role="status" aria-live="polite"></p><div id="complex-result"></div>`;
+    <p id="complex-status" role="status" aria-live="polite"></p><button id="complex-retry" class="secondary" hidden>按上次范围重试</button><div id="complex-result"></div>`;
   document.body.append(dialog);
   const consent = node('dialog'); consent.id = 'complex-confirm';
   consent.innerHTML = '<div class="dialog-header"><h2>启动本地增强解析</h2><button id="complex-confirm-close" class="icon-button" aria-label="关闭解析确认">×</button></div><p id="complex-confirm-description"></p><div class="dialog-actions"><button id="complex-confirm-start" class="primary">开始本地解析</button></div>';
@@ -31,32 +38,39 @@ export function installComplex({ state, $, node, api, toast, locateBlock, render
   for (const id of ['complex-start-page', 'complex-end-page']) $(id).oninput = () => { $('complex-start').disabled = !runtime?.available || !validRange() || !$('complex-cancel').hidden; };
   async function readRuntime() {
     const current = target, sequence = ++runtimeSequence;
+    runtime = null;
+    $('complex-start').disabled = true;
     const result = await api('/desktop/complex/runtime?ocr=' + $('complex-ocr').checked);
     if (!live() || target !== current || sequence !== runtimeSequence) return;
     runtime = result; $('complex-runtime').textContent = result.reason || `${result.warning} · 后端 ${result.backend} · 依赖是否完整以实际启动为准`;
+    if (!result.available) $('complex-setup').open = true;
+    $('complex-missing-models').replaceChildren(...(result.missing_models || []).map(name => node('li', '', name)));
     $('complex-start').disabled = !result.available || !validRange() || !$('complex-cancel').hidden;
   }
-  async function open() {
+  async function open({ ocr = false, page = state.page } = {}) {
     if (dialog.open) return;
     if (!state.paper?.local_pdf_path) return toast('请先下载或导入 PDF');
     target = { id: state.paper.id, version: state.loadVersion }; runtime = null; preview = null; selectedTable = null; renderedRevision = null;
-    $('complex-start-page').value = state.page + 1; $('complex-end-page').value = state.page + 1;
+    $('complex-start-page').value = page + 1; $('complex-end-page').value = page + 1;
     for (const id of ['complex-start-page', 'complex-end-page']) $(id).max = state.total;
-    $('complex-ocr').checked = false; $('complex-cancel').hidden = true; $('complex-start').disabled = true;
+    $('complex-ocr').checked = ocr; $('complex-cancel').hidden = true; $('complex-start').disabled = true;
+    $('complex-retry').hidden = true; $('complex-setup').open = false;
     $('complex-status').textContent = '正在读取本地解析状态…'; $('complex-result').replaceChildren();
     dialog.showModal();
     try { await readRuntime(); await poll(); } catch (error) { if (live()) $('complex-status').textContent = error.message + '。可以重新解析，或继续原文阅读。'; }
   }
+  let planned = null;
   $('complex-start').onclick = () => {
     if (!live() || !runtime?.available || !validRange()) return;
-    $('complex-confirm-description').textContent = `解析第 ${$('complex-start-page').value}–${$('complex-end-page').value} 页${$('complex-ocr').checked ? '，启用英文 OCR（PDFium 渲染，仍需核对原页）' : ''}。仅使用本机独立环境和已有模型，不上传 PDF、不调用翻译接口、不下载模型。可能占用约 1.5 GB 内存。成功后更新增强预览；现有正文、译文与笔记不变。`;
+    planned = { start_page: Number($('complex-start-page').value), end_page: Number($('complex-end-page').value), ocr: $('complex-ocr').checked };
+    $('complex-confirm-description').textContent = `解析第 ${planned.start_page}–${planned.end_page} 页${planned.ocr ? '，启用英文 OCR（PDFium 渲染，仍需核对原页）' : ''}。使用本机模型生成独立预览。可能占用约 1.5 GB 内存。`;
     consent.showModal();
   };
   $('complex-confirm-start').onclick = async () => {
-    if (!live() || !validRange()) return consent.close();
+    if (!live() || !planned) return consent.close();
     const current = target; $('complex-confirm-start').disabled = true;
     try {
-      await api(`/desktop/papers/${current.id}/complex`, 'POST', { start_page: Number($('complex-start-page').value), end_page: Number($('complex-end-page').value), ocr: $('complex-ocr').checked });
+      await api(`/desktop/papers/${current.id}/complex`, 'POST', planned);
       consent.close(); if (live() && target === current) await poll();
     } catch (error) { toast(error.message, true); }
     finally { $('complex-confirm-start').disabled = false; }
@@ -73,6 +87,17 @@ export function installComplex({ state, $, node, api, toast, locateBlock, render
     const current = target, sequence = ++pollSequence; const data = await api(`/desktop/papers/${current.id}/complex`);
     if (!live() || current !== target || !dialog.open || sequence !== pollSequence) return;
     const job = data.job, running = busy(job);
+    $('complex-retry').hidden = !(['failed', 'paused', 'cancelled'].includes(job.status) && job.start_page && job.end_page);
+    $('complex-retry').onclick = async () => {
+      if (!live()) return;
+      try {
+        $('complex-start-page').value = job.start_page;
+        $('complex-end-page').value = job.end_page;
+        $('complex-ocr').checked = !!job.ocr;
+        await readRuntime();
+        if (live() && target === current) $('complex-start').click();
+      } catch (error) { if (live()) toast(error.message, true); }
+    };
     $('complex-cancel').hidden = !running; $('complex-cancel').disabled = job.status === 'cancelling';
     $('complex-start').disabled = running || !runtime?.available || !validRange();
     const labels = { idle: '尚未解析', queued: '准备本地模型', running: '本地解析中（暂无页级进度）', cancelling: '正在停止独立解析进程', cancelled: '已取消，原内容保留', failed: '解析失败，原内容保留', paused: '上次解析中断，可重新解析', done: '增强预览已就绪' };
